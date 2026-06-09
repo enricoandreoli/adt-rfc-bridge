@@ -223,5 +223,14 @@ RFC-only client, copy the entry, pick a **different** `BRIDGE_PORT` and matching
 
 [MIT](LICENSE).
 
+---
+
+## More tech reads
+
+Like this kind of practical tech content? I also share technology news,
+explainers and tools at **[The Clipboard][clipboard]** (theclipboard.it).
+Worth a look if you enjoyed this write-up.
+
 [vsp]: https://github.com/oisee/vibing-steampunk
 [pyrfc]: https://github.com/SAP-archive/PyRFC
+[clipboard]: https://theclipboard.it
