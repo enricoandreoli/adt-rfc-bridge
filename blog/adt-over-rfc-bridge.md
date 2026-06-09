@@ -3,7 +3,7 @@
 *Claude can write, read and refactor ABAP directly in your SAP system through an
 MCP server (`vsp`) that speaks the ADT REST API. But some SAP systems are only
 reachable over RFC through a SAProuter, where that HTTP API can't get through.
-Here's how I closed that gap with a small local ADT-over-RFC bridge — so you get
+Here's how I closed that gap with a small local ADT-over-RFC bridge, so you get
 the full Claude + SAP ABAP experience even on locked-down systems, with no
 changes on the SAP side.*
 
@@ -18,24 +18,24 @@ changes on the SAP side.*
 - That integration talks to SAP using the **ADT REST API over HTTP**.
 - Many real-world SAP systems are reachable **only through a SAProuter**, and many
   of those routers permit SAP's native **NI** routes (DIAG, gateway) while
-  **denying raw HTTP routing to the ICM**. The HTTP-based Claude↔SAP link then
-  **cannot connect** — even though **Eclipse ADT can**.
+  **denying raw HTTP routing to the ICM**. The HTTP-based Claude/SAP link then
+  **cannot connect**, even though **Eclipse ADT can**.
 - Eclipse can because, in that situation, it does **not** use plain HTTP: it
   **tunnels ADT over RFC** to the gateway, through the standard function module
   **`SADT_REST_RFC_ENDPOINT`**.
-- The fix is a small **local HTTP→RFC bridge**: it accepts ADT HTTP requests on
+- The fix is a small **local HTTP-to-RFC bridge**: it accepts ADT HTTP requests on
   `localhost` and forwards each one over RFC via **[PyRFC][pyrfc]** (whose
   `saprouter` parameter traverses the router natively). Point `vsp` (and therefore
-  Claude) at the bridge and you get the full ADT experience — **nothing changes on
+  Claude) at the bridge and you get the full ADT experience. **Nothing changes on
   the customer side.**
 - Code + install guide: **[adt-rfc-bridge on GitHub][repo]**.
 
 ---
 
-## Using Claude with SAP ABAP — a quick primer
+## Using Claude with SAP ABAP: a quick primer
 
 If you haven't tried it yet: **Claude can act as an AI developer inside your SAP
-system.** The bridge between the two is an **MCP server** — Model Context Protocol
+system.** The bridge between the two is an **MCP server**. Model Context Protocol
 is the open standard that lets an AI assistant call external tools. For SAP ABAP,
 the MCP server I use is **[`vsp` (vibing-steampunk)][vsp]**: it connects to SAP
 via the **ABAP Development Tools (ADT)** REST API and gives Claude operations like
@@ -49,21 +49,22 @@ So a typical setup is:
 
 With that in place you can ask Claude things like *"find all reports in package
 Z* that call this function module and add a guard clause"*, and it works against
-the live ABAP repository — the same objects you'd open in Eclipse or SE80.
+the live ABAP repository, the same objects you'd open in Eclipse or SE80.
 
 There's just **one catch**, and it's what this post is about.
 
-## The problem: the Claude↔SAP HTTP link can't get through some SAProuters
+## The problem: the Claude/SAP HTTP link can't get through some SAProuters
 
-`vsp` — and therefore Claude — talks to SAP **only over HTTP** (ADT REST). For
+`vsp`, and therefore Claude, talks to SAP **only over HTTP** (ADT REST). For
 most systems that's fine: you give it an `https://host:44300`-style URL and you're
 done. But I work across several SAP customers, and one category of system refused
-to connect. Several of them are reachable **only through a SAProuter** — you
+to connect. Several of them are reachable **only through a SAProuter**. You
 connect with a route string like `/H/router/S/3299/H/appserver/...`.
 
 Here's the catch. A SAProuter route string is **not HTTP**. It is SAP's own
 **NI (Network Interface)** protocol. You cannot put a `/H/.../S/...` string into
-an `SAP_URL` or an `HTTPS_PROXY` — an HTTP client has no idea what to do with it.
+an `SAP_URL` or an `HTTPS_PROXY`, because an HTTP client has no idea what to do
+with it.
 
 "Fine," I thought, "the router will just forward me to the ICM's HTTP port."
 Often it won't. A SAProuter only forwards what its **`saprouttab`** allows, and
@@ -74,8 +75,8 @@ on these systems the `saprouttab`:
 - **denies** *raw* routing to the ICM HTTP/HTTPS port.
 
 So there is **no HTTP path at all** from my PC to those systems through the
-router — which means no Claude + SAP ABAP either. And — an important constraint of
-consulting — **I cannot ask the customer to change anything**: no new Web
+router, which means no Claude + SAP ABAP either. And, an important constraint of
+consulting, **I cannot ask the customer to change anything**: no new Web
 Dispatcher, no `saprouttab` edits.
 
 Yet **Eclipse ADT connects to these exact systems and works perfectly.** That was
@@ -85,10 +86,10 @@ Eclipse is **not** doing ADT over plain HTTP.
 ## The investigation: what is Eclipse actually doing?
 
 I wanted evidence, not guesses. (Everything below was done against connectivity I
-already had, without probing customer systems blindly — and never by hammering
+already had, without probing customer systems blindly, and never by hammering
 logons, which would lock the user.)
 
-**Step 1 — Confirm the HTTP door is shut.** I wrote a tiny SAProuter client to
+**Step 1, confirm the HTTP door is shut.** I wrote a tiny SAProuter client to
 test, at the NI level only, which routes the router would accept:
 
 - A route to the **gateway / dispatcher** ports → **permitted** (`NI_PONG`).
@@ -97,11 +98,11 @@ test, at the NI level only, which routes the router would accept:
 
 So: NI-native yes, raw HTTP no. That matches the symptom exactly.
 
-**Step 2 — Watch Eclipse.** I put a small **logging TCP proxy** in front of the
+**Step 2, watch Eclipse.** I put a small **logging TCP proxy** in front of the
 router on `127.0.0.1`, pointed Eclipse's SAProuter string at the proxy (rewriting
 the first hop), and connected once. The capture was decisive:
 
-- SAP GUI's route went to the **DIAG** port — as expected.
+- SAP GUI's route went to the **DIAG** port, as expected.
 - **Eclipse ADT's route went to the gateway / RFC port**, and the payload was
   **RFC serialisation**, not HTTP. Inside it, in length-prefixed fields, were
   unmistakable ADT artefacts: `HTTP/1.1`, a `HEADER_FIELDS` table, ADT paths like
@@ -110,12 +111,12 @@ the first hop), and connected once. The capture was decisive:
 In other words: **Eclipse takes each ADT HTTP request, serialises it, and sends
 it over RFC to the gateway.** On the SAP side a function module receives that
 request, runs it against the ADT framework internally, and returns the HTTP
-response — again over RFC.
+response, again over RFC.
 
-**Step 3 — Name the function module.** A bit of research plus the captured field
+**Step 3, name the function module.** A bit of research plus the captured field
 names pointed straight at it:
 
-> **`SADT_REST_RFC_ENDPOINT`** — "Endpoint for ADT REST Framework."
+> **`SADT_REST_RFC_ENDPOINT`**, "Endpoint for ADT REST Framework."
 > - IMPORT `REQUEST` (`SADT_REST_REQUEST`): request line (method, URI, version),
 >   a `HEADER_FIELDS` table, and an `xstring` body.
 > - EXPORT `RESPONSE` (`SADT_REST_RESPONSE`): status line, header fields, body.
@@ -125,13 +126,13 @@ how ADT works over RFC, and the authorisations needed (`S_RFC` for the FM plus
 the ADT resource authorisations) are the same ones your user already has if
 Eclipse works.
 
-## The solution: a local HTTP→RFC bridge for Claude + SAP
+## The solution: a local HTTP-to-RFC bridge for Claude + SAP
 
 If Eclipse can map ADT HTTP onto `SADT_REST_RFC_ENDPOINT`, so can a small script.
 And there's a perfect building block on the Python side: **[PyRFC][pyrfc]**, the
 official Python binding to the SAP NW RFC SDK. Crucially, **PyRFC accepts a
 `saprouter` connection parameter** and traverses the router **natively**, exactly
-like JCo/Eclipse — no NI reimplementation needed.
+like JCo/Eclipse, with no NI reimplementation needed.
 
 So the bridge sits between Claude's MCP server and SAP:
 
@@ -189,11 +190,11 @@ an ADT client expects it" and "HTTP as the function module delivers it":
    client must echo back on writes. Over RFC there is **no HTTP session**, so no
    token is issued. ADT clients refuse to write without one. Since the function
    module is already authenticated by the **RFC logon** and does not validate
-   CSRF, the bridge returns a placeholder token on `fetch` requests — just enough
+   CSRF, the bridge returns a placeholder token on `fetch` requests, just enough
    to satisfy the client.
 
 With those two fixes in place, `vsp` behaves exactly as if it were talking to a
-normal ICM — and Claude is none the wiser.
+normal ICM, and Claude is none the wiser.
 
 ## Try it yourself
 
@@ -205,13 +206,13 @@ Full code, configuration template and a step-by-step guide are in the repo:
 - **SAP NW RFC SDK** on your library path. On Windows it usually comes **with SAP
   GUI** (`sapnwrfc.dll`); otherwise download "SAP NWRFC SDK 7.50" from the SAP
   Support Portal.
-- **An x64 Python** — the NW RFC SDK is x86-64 only, so even on ARM Windows you
+- **An x64 Python.** The NW RFC SDK is x86-64 only, so even on ARM Windows you
   need an x64 Python (an arm64 Python cannot load the x64 SDK).
 - **PyRFC** matching that Python/SDK: `pip install pyrfc` (or a prebuilt wheel
   from the PyRFC releases).
 - **`vsp`** (or any HTTP-based ADT client) and a Claude client that speaks MCP
   (Claude Desktop or Claude Code).
-- A user with the ADT/RFC authorisations — **if Eclipse ADT works, you have
+- A user with the ADT/RFC authorisations. **If Eclipse ADT works, you have
   them.**
 
 > ⚠️ Architecture must match end to end: **x64 SDK ↔ x64 Python ↔ x64 PyRFC**.
@@ -229,7 +230,7 @@ RFC_SAPROUTER=/H/<router>/S/3299   # omit for direct (no-router) access
 BRIDGE_PORT=8410
 ```
 
-**Verify** with the built-in self-test — one ADT discovery call all the way to
+**Verify** with the built-in self-test, one ADT discovery call all the way to
 SAP and back:
 
 ```bash
@@ -259,44 +260,44 @@ Claude can develop ABAP on that system like any other.
 
 After this, **Claude drives ABAP development on a system whose only ingress is an
 RFC-permitting SAProuter.** System info, object search, reading and editing
-source, running checks — the **full ADT experience**, on a system where plain HTTP
+source, running checks: the **full ADT experience**, on a system where plain HTTP
 never gets through, **with zero changes on the customer side.** The same trick
 works for any HTTP-only ADT client, not just `vsp`.
 
 ## Limitations & safety
 
-- You need the NW RFC SDK and an RFC user with the ADT authorisations — i.e. a
+- You need the NW RFC SDK and an RFC user with the ADT authorisations, i.e. a
   setup where **Eclipse ADT already works**. If Eclipse can't connect either,
   this won't magically open a door.
 - The bridge reuses a single serialised RFC connection: simple and lock-safe, but
   not designed for many parallel clients pounding one bridge.
-- It bridges the ADT REST surface exposed by `SADT_REST_RFC_ENDPOINT` — which is
+- It bridges the ADT REST surface exposed by `SADT_REST_RFC_ENDPOINT`, which is
   what Eclipse uses, so everyday development works; very exotic ICM-only
   endpoints are out of scope.
 - **Account-lockout safety:** each ADT call is one RFC logon attempt. If a call
-  fails with an *authentication* error, stop and fix the credentials — never
+  fails with an *authentication* error, stop and fix the credentials, never
   loop/retry, or SAP will lock the user. The bridge itself never auto-retries a
   failed logon.
 - **Supportability:** this is a community solution. It calls a standard SAP
   function module the same way Eclipse ADT does, but this is not an officially
-  documented integration point — test it in a non-production system first, and
+  documented integration point. Test it in a non-production system first, and
   make sure it fits your organisation's security and connectivity policies.
 
 ## Credits & links
 
 - **Code & guide:** [adt-rfc-bridge][repo]
-- **`vsp` / vibing-steampunk** — the ABAP ADT MCP server that lets Claude develop
+- **`vsp` / vibing-steampunk**, the ABAP ADT MCP server that lets Claude develop
   in SAP, and the HTTP-only client this bridge was built to serve:
   [oisee/vibing-steampunk][vsp]
-- **PyRFC** — Python ↔ NW RFC SDK binding that traverses the SAProuter:
+- **PyRFC**, the Python ↔ NW RFC SDK binding that traverses the SAProuter:
   [SAP-archive/PyRFC][pyrfc]
-- **`SADT_REST_RFC_ENDPOINT`** — the standard SAP function module that dispatches
+- **`SADT_REST_RFC_ENDPOINT`**, the standard SAP function module that dispatches
   ADT REST over RFC (the same one Eclipse ADT uses)
-- **Model Context Protocol (MCP)** — the open standard that connects Claude to
+- **Model Context Protocol (MCP)**, the open standard that connects Claude to
   tools like `vsp`.
 
 *If this helped you get Claude working against your SAP ABAP systems, say hi in
-the comments — and tell me which other "HTTP-only tool vs. RFC-only system"
+the comments, and tell me which other "HTTP-only tool vs. RFC-only system"
 situations you'd like to see bridged.*
 
 [vsp]: https://github.com/oisee/vibing-steampunk

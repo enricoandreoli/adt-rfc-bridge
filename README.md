@@ -1,8 +1,8 @@
 # ADT-over-RFC bridge
 
-**Give any HTTP-only ABAP ADT client — including the [`vsp`][vsp] MCP server that
-lets Claude develop ABAP in SAP — full access to a SAP system that is only
-reachable over RFC / through a SAProuter.**
+**Give any HTTP-only ABAP ADT client full access to a SAP system that is only
+reachable over RFC / through a SAProuter. That includes the [`vsp`][vsp] MCP
+server that lets Claude develop ABAP in SAP.**
 
 Tools like [`vsp` / vibing-steampunk][vsp] let **Claude** (or another AI/MCP
 client) read, search and edit ABAP in your SAP system through the **ADT REST API
@@ -13,7 +13,7 @@ though Eclipse ADT can.
 
 This bridge fixes that. It is a tiny local HTTP server that takes each ADT REST
 request from your HTTP client and forwards it to SAP over **RFC**, through the
-standard function module `SADT_REST_RFC_ENDPOINT` — the very same path Eclipse
+standard function module `SADT_REST_RFC_ENDPOINT`, the very same path Eclipse
 ADT uses when it tunnels ADT over RFC. Nothing changes on the SAP side.
 
 ```mermaid
@@ -24,7 +24,7 @@ flowchart LR
     D --> E[("ADT framework")]
 ```
 
-> 📖 The full story — the problem, the investigation, and why this works — is
+> 📖 The full story, the problem, the investigation, and why this works, is
 > written up in the companion blog post: **[`blog/adt-over-rfc-bridge.md`](blog/adt-over-rfc-bridge.md)**.
 
 ---
@@ -66,7 +66,7 @@ Two small adaptations make HTTP clients happy:
   does not validate CSRF, so this only satisfies the client.
 
 A single, lock-serialised RFC connection is reused so ADT stateful sessions
-(object locks etc.) survive across calls. The bridge connects **lazily** — it
+(object locks etc.) survive across calls. The bridge connects **lazily**, it
 performs no SAP logon until the first ADT request.
 
 ---
@@ -98,7 +98,7 @@ cp .env.example .env   # Windows: copy .env.example .env
 # edit .env with your RFC host, sysnr, client, user, password, saprouter, port
 ```
 
-`.env` is git-ignored on purpose — it holds your credentials. Never commit it.
+`.env` is git-ignored on purpose, it holds your credentials. Never commit it.
 
 ## Verify it works
 
@@ -118,11 +118,11 @@ body bytes: 4187
 <?xml version="1.0" encoding="utf-8"?><app:service ...>
 ```
 
-A `200` with an `atomsvc+xml` body means the whole chain — bridge → pyrfc →
-SAProuter → `SADT_REST_RFC_ENDPOINT` → SAP — is working.
+A `200` with an `atomsvc+xml` body means the whole chain, bridge → pyrfc →
+SAProuter → `SADT_REST_RFC_ENDPOINT` → SAP, is working.
 
 > ⚠️ **Account-lockout safety:** every ADT call is one RFC logon attempt. If a
-> call fails with an **authentication** error, stop and fix the credentials —
+> call fails with an **authentication** error, stop and fix the credentials,
 > do **not** loop/retry, or SAP will lock the user. The bridge itself never
 > auto-retries a failed logon.
 
@@ -195,7 +195,7 @@ RFC-only client, copy the entry, pick a **different** `BRIDGE_PORT` and matching
 
 ## Limitations
 
-- Requires the NW RFC SDK and an RFC user with the ADT authorisations — i.e. a
+- Requires the NW RFC SDK and an RFC user with the ADT authorisations, i.e. a
   setup where Eclipse ADT already works.
 - Reuses one serialised RFC connection: simple and lock-safe, but not tuned for
   many parallel ADT clients hammering one bridge.
@@ -206,17 +206,17 @@ RFC-only client, copy the entry, pick a **different** `BRIDGE_PORT` and matching
 ## Security notes
 
 - `.env` and `adt_bridge.log` are git-ignored. The log can contain request URIs
-  and header values — keep it local and delete it when done debugging.
+  and header values, keep it local and delete it when done debugging.
 - The bridge listens on `127.0.0.1` only.
 - Treat your RFC credentials like any SAP password.
 
 ## Credits
 
-- **`vsp` / vibing-steampunk** — the HTTP-only ABAP ADT MCP client this bridge
+- **`vsp` / vibing-steampunk**, the HTTP-only ABAP ADT MCP client this bridge
   was built to serve: [oisee/vibing-steampunk][vsp].
-- **PyRFC** — the Python ↔ NW RFC SDK binding that traverses the SAProuter:
+- **PyRFC**, the Python ↔ NW RFC SDK binding that traverses the SAProuter:
   [SAP-archive/PyRFC][pyrfc].
-- **`SADT_REST_RFC_ENDPOINT`** — the standard SAP function module that dispatches
+- **`SADT_REST_RFC_ENDPOINT`**, the standard SAP function module that dispatches
   ADT REST requests over RFC (the same one Eclipse ADT uses).
 
 ## License
