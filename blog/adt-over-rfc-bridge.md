@@ -2,7 +2,7 @@
 
 *How I gave an HTTP-only ADT tool (`vsp`) full access to a SAP system that is
 only reachable over RFC through a SAProuter — by tunnelling ADT over RFC the same
-way Eclipse does, with a ~150-line local bridge. No changes on the SAP side.*
+way Eclipse does, with a small local bridge. No changes on the SAP side.*
 
 ---
 
@@ -254,6 +254,10 @@ HTTP never gets through, **with zero changes on the customer side.**
   fails with an *authentication* error, stop and fix the credentials — never
   loop/retry, or SAP will lock the user. The bridge itself never auto-retries a
   failed logon.
+- **Supportability:** this is a community solution. It calls a standard SAP
+  function module the same way Eclipse ADT does, but this is not an officially
+  documented integration point — test it in a non-production system first, and
+  make sure it fits your organisation's security and connectivity policies.
 
 ## Credits & links
 

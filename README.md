@@ -13,9 +13,12 @@ request from your HTTP client and forwards it to SAP over **RFC**, through the
 standard function module `SADT_REST_RFC_ENDPOINT` — the very same path Eclipse
 ADT uses when it tunnels ADT over RFC. Nothing changes on the SAP side.
 
-```
-  your ADT client  --HTTP-->  adt_rfc_bridge.py (localhost)
-                   --pyrfc / RFC (+ saprouter)-->  SADT_REST_RFC_ENDPOINT  (SAP)
+```mermaid
+flowchart LR
+    A["ADT client<br/>(vsp, HTTP-only)"] -- "HTTP<br/>ADT REST" --> B["adt_rfc_bridge.py<br/>(localhost)"]
+    B -- "RFC via PyRFC<br/>(+ saprouter)" --> C(["SAProuter"])
+    C -- "RFC" --> D["SADT_REST_RFC_ENDPOINT<br/>(SAP gateway)"]
+    D --> E[("ADT framework")]
 ```
 
 > 📖 The full story — the problem, the investigation, and why this works — is
