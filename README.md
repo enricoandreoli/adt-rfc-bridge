@@ -1,12 +1,15 @@
 # ADT-over-RFC bridge
 
-**Give any HTTP-only ABAP ADT client full access to a SAP system that is only
+**Give any HTTP-only ABAP ADT client — including the [`vsp`][vsp] MCP server that
+lets Claude develop ABAP in SAP — full access to a SAP system that is only
 reachable over RFC / through a SAProuter.**
 
-Some SAP systems can only be reached through a SAProuter that allows the SAP
-*NI* protocol (DIAG, gateway/RFC) but **not** raw HTTP routing to the ICM. An ADT
-client that speaks only HTTP — for example [`vsp` / vibing-steampunk][vsp] — then
-cannot connect at all, even though Eclipse ADT can.
+Tools like [`vsp` / vibing-steampunk][vsp] let **Claude** (or another AI/MCP
+client) read, search and edit ABAP in your SAP system through the **ADT REST API
+over HTTP**. But some SAP systems can only be reached through a SAProuter that
+allows the SAP *NI* protocol (DIAG, gateway/RFC) but **not** raw HTTP routing to
+the ICM. An ADT client that speaks only HTTP then cannot connect at all, even
+though Eclipse ADT can.
 
 This bridge fixes that. It is a tiny local HTTP server that takes each ADT REST
 request from your HTTP client and forwards it to SAP over **RFC**, through the

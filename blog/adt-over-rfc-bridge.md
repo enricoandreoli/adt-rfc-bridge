@@ -1,47 +1,64 @@
-# Bringing an HTTP-only ABAP ADT client to RFC-only / SAProuter SAP systems
+# Using Claude for SAP ABAP development on RFC-only / SAProuter systems
 
-*How I gave an HTTP-only ADT tool (`vsp`) full access to a SAP system that is
-only reachable over RFC through a SAProuter — by tunnelling ADT over RFC the same
-way Eclipse does, with a small local bridge. No changes on the SAP side.*
+*Claude can write, read and refactor ABAP directly in your SAP system through an
+MCP server (`vsp`) that speaks the ADT REST API. But some SAP systems are only
+reachable over RFC through a SAProuter, where that HTTP API can't get through.
+Here's how I closed that gap with a small local ADT-over-RFC bridge — so you get
+the full Claude + SAP ABAP experience even on locked-down systems, with no
+changes on the SAP side.*
 
 ---
 
 ## TL;DR
 
-- Modern AI/MCP-based ABAP tooling such as **[`vsp` (vibing-steampunk)][vsp]**
-  talks to SAP using the **ADT REST API over HTTP**.
-- Many real-world systems are reachable **only through a SAProuter**, and many of
-  those routers permit SAP's native **NI** routes (DIAG, gateway) while
-  **denying raw HTTP routing to the ICM**. An HTTP-only client then simply
+- **You can use Claude as an AI pair programmer for SAP ABAP.** Tools like
+  **[`vsp` (vibing-steampunk)][vsp]** expose SAP's **ABAP Development Tools (ADT)**
+  to Claude through the **Model Context Protocol (MCP)**, so Claude can read,
+  search, edit and check ABAP source straight in your system.
+- That integration talks to SAP using the **ADT REST API over HTTP**.
+- Many real-world SAP systems are reachable **only through a SAProuter**, and many
+  of those routers permit SAP's native **NI** routes (DIAG, gateway) while
+  **denying raw HTTP routing to the ICM**. The HTTP-based Claude↔SAP link then
   **cannot connect** — even though **Eclipse ADT can**.
 - Eclipse can because, in that situation, it does **not** use plain HTTP: it
   **tunnels ADT over RFC** to the gateway, through the standard function module
   **`SADT_REST_RFC_ENDPOINT`**.
 - The fix is a small **local HTTP→RFC bridge**: it accepts ADT HTTP requests on
   `localhost` and forwards each one over RFC via **[PyRFC][pyrfc]** (whose
-  `saprouter` parameter traverses the router natively). Point your HTTP client at
-  the bridge and you get the full ADT experience — **nothing changes on the
-  customer side.**
+  `saprouter` parameter traverses the router natively). Point `vsp` (and therefore
+  Claude) at the bridge and you get the full ADT experience — **nothing changes on
+  the customer side.**
 - Code + install guide: **[adt-rfc-bridge on GitHub][repo]**.
 
 ---
 
-## The goal
+## Using Claude with SAP ABAP — a quick primer
 
-I work across several SAP customers and I wanted the same modern, AI-assisted
-ABAP development experience on **all** of them. The tool I use, `vsp`
-(vibing-steampunk), is an **ABAP Development Tools (ADT) MCP server and CLI**: it
-exposes SAP development operations — read/search/edit source, run checks, debug —
-to an AI assistant through the ADT REST API.
+If you haven't tried it yet: **Claude can act as an AI developer inside your SAP
+system.** The bridge between the two is an **MCP server** — Model Context Protocol
+is the open standard that lets an AI assistant call external tools. For SAP ABAP,
+the MCP server I use is **[`vsp` (vibing-steampunk)][vsp]**: it connects to SAP
+via the **ABAP Development Tools (ADT)** REST API and gives Claude operations like
+*read source*, *search objects*, *edit source*, *run ABAP checks*, and *debug*.
 
-`vsp` speaks **only HTTP** (ADT REST). For most systems that's fine: you give it
-an `https://host:44300`-style URL and you're done. But one category of system
-refused to work, and chasing down *why* turned into a small investigation worth
-sharing — because the fix is reusable by anyone in the same situation.
+So a typical setup is:
 
-## The problem: HTTP can't get through some SAProuters
+```
+  Claude (Claude Desktop / Claude Code)  --MCP-->  vsp  --ADT REST over HTTP-->  SAP
+```
 
-Several of my target systems are reachable **only through a SAProuter** — you
+With that in place you can ask Claude things like *"find all reports in package
+Z* that call this function module and add a guard clause"*, and it works against
+the live ABAP repository — the same objects you'd open in Eclipse or SE80.
+
+There's just **one catch**, and it's what this post is about.
+
+## The problem: the Claude↔SAP HTTP link can't get through some SAProuters
+
+`vsp` — and therefore Claude — talks to SAP **only over HTTP** (ADT REST). For
+most systems that's fine: you give it an `https://host:44300`-style URL and you're
+done. But I work across several SAP customers, and one category of system refused
+to connect. Several of them are reachable **only through a SAProuter** — you
 connect with a route string like `/H/router/S/3299/H/appserver/...`.
 
 Here's the catch. A SAProuter route string is **not HTTP**. It is SAP's own
@@ -57,8 +74,9 @@ on these systems the `saprouttab`:
 - **denies** *raw* routing to the ICM HTTP/HTTPS port.
 
 So there is **no HTTP path at all** from my PC to those systems through the
-router. And — an important constraint of consulting — **I cannot ask the customer
-to change anything**: no new Web Dispatcher, no `saprouttab` edits.
+router — which means no Claude + SAP ABAP either. And — an important constraint of
+consulting — **I cannot ask the customer to change anything**: no new Web
+Dispatcher, no `saprouttab` edits.
 
 Yet **Eclipse ADT connects to these exact systems and works perfectly.** That was
 the clue: if Eclipse can do ADT against a system where raw HTTP is blocked, then
@@ -107,7 +125,7 @@ how ADT works over RFC, and the authorisations needed (`S_RFC` for the FM plus
 the ADT resource authorisations) are the same ones your user already has if
 Eclipse works.
 
-## The solution: a local HTTP→RFC bridge
+## The solution: a local HTTP→RFC bridge for Claude + SAP
 
 If Eclipse can map ADT HTTP onto `SADT_REST_RFC_ENDPOINT`, so can a small script.
 And there's a perfect building block on the Python side: **[PyRFC][pyrfc]**, the
@@ -115,10 +133,11 @@ official Python binding to the SAP NW RFC SDK. Crucially, **PyRFC accepts a
 `saprouter` connection parameter** and traverses the router **natively**, exactly
 like JCo/Eclipse — no NI reimplementation needed.
 
-So the bridge is just:
+So the bridge sits between Claude's MCP server and SAP:
 
 ```
-  vsp (HTTP)  -->  bridge on 127.0.0.1:<port>  -->  PyRFC (RFC + saprouter)  -->  SADT_REST_RFC_ENDPOINT
+  Claude --MCP--> vsp (HTTP) --> bridge on 127.0.0.1:<port>
+         --> PyRFC (RFC + saprouter) --> SADT_REST_RFC_ENDPOINT (SAP)
 ```
 
 For each incoming ADT HTTP request the bridge:
@@ -158,7 +177,7 @@ Connection(
 )
 ```
 
-### Two adaptations to keep HTTP clients happy
+### Two adaptations to keep the ADT client happy
 
 Replaying captured Eclipse traffic exposed exactly two mismatches between "HTTP as
 an ADT client expects it" and "HTTP as the function module delivers it":
@@ -173,8 +192,8 @@ an ADT client expects it" and "HTTP as the function module delivers it":
    CSRF, the bridge returns a placeholder token on `fetch` requests — just enough
    to satisfy the client.
 
-With those two fixes in place, the HTTP-only client behaves exactly as if it were
-talking to a normal ICM.
+With those two fixes in place, `vsp` behaves exactly as if it were talking to a
+normal ICM — and Claude is none the wiser.
 
 ## Try it yourself
 
@@ -190,6 +209,8 @@ Full code, configuration template and a step-by-step guide are in the repo:
   need an x64 Python (an arm64 Python cannot load the x64 SDK).
 - **PyRFC** matching that Python/SDK: `pip install pyrfc` (or a prebuilt wheel
   from the PyRFC releases).
+- **`vsp`** (or any HTTP-based ADT client) and a Claude client that speaks MCP
+  (Claude Desktop or Claude Code).
 - A user with the ADT/RFC authorisations — **if Eclipse ADT works, you have
   them.**
 
@@ -220,25 +241,27 @@ python adt_rfc_bridge.py selftest
 
 A `200` with an `atomsvc+xml` body means the whole chain works.
 
-**Run** the bridge and point your HTTP-only client at it:
+**Run** the bridge and point `vsp` at it:
 
 ```bash
 python adt_rfc_bridge.py            # listens on http://127.0.0.1:8410
 # then, for vsp:  SAP_URL=http://127.0.0.1:8410  (+ SAP_USER / SAP_PASSWORD / SAP_CLIENT)
 ```
 
-The repo also includes a small **MCP launcher** (`vsp_launch.py`) that an MCP
-host like Claude Desktop can start directly: it auto-starts the bridge if needed,
-then hands over to the ADT client. You add **one MCP server entry per SAP
-client**, each with its own `BRIDGE_PORT` and RFC settings. Because the bridge
-connects lazily, idle clients never log on to SAP.
+**Wire it into Claude.** The repo includes a small **MCP launcher**
+(`vsp_launch.py`) that a Claude client (Claude Desktop) can start directly: it
+auto-starts the bridge if needed, then hands over to `vsp`. You add **one MCP
+server entry per SAP client**, each with its own `BRIDGE_PORT` and RFC settings.
+Because the bridge connects lazily, idle clients never log on to SAP. After that,
+Claude can develop ABAP on that system like any other.
 
 ## Result
 
-After this, `vsp` — an HTTP-only tool — drives ADT against a system whose **only**
-ingress is an RFC-permitting SAProuter. System info, object search, reading and
-editing source, the lot: the **full ADT experience**, on a system where plain
-HTTP never gets through, **with zero changes on the customer side.**
+After this, **Claude drives ABAP development on a system whose only ingress is an
+RFC-permitting SAProuter.** System info, object search, reading and editing
+source, running checks — the **full ADT experience**, on a system where plain HTTP
+never gets through, **with zero changes on the customer side.** The same trick
+works for any HTTP-only ADT client, not just `vsp`.
 
 ## Limitations & safety
 
@@ -262,16 +285,19 @@ HTTP never gets through, **with zero changes on the customer side.**
 ## Credits & links
 
 - **Code & guide:** [adt-rfc-bridge][repo]
-- **`vsp` / vibing-steampunk** — the HTTP-only ABAP ADT MCP client this was built
-  to serve: [oisee/vibing-steampunk][vsp]
+- **`vsp` / vibing-steampunk** — the ABAP ADT MCP server that lets Claude develop
+  in SAP, and the HTTP-only client this bridge was built to serve:
+  [oisee/vibing-steampunk][vsp]
 - **PyRFC** — Python ↔ NW RFC SDK binding that traverses the SAProuter:
   [SAP-archive/PyRFC][pyrfc]
 - **`SADT_REST_RFC_ENDPOINT`** — the standard SAP function module that dispatches
   ADT REST over RFC (the same one Eclipse ADT uses)
+- **Model Context Protocol (MCP)** — the open standard that connects Claude to
+  tools like `vsp`.
 
-*If this saved you a day of packet-staring, say hi in the comments — and tell me
-which other "HTTP-only tool vs. RFC-only system" situations you'd like to see
-bridged.*
+*If this helped you get Claude working against your SAP ABAP systems, say hi in
+the comments — and tell me which other "HTTP-only tool vs. RFC-only system"
+situations you'd like to see bridged.*
 
 [vsp]: https://github.com/oisee/vibing-steampunk
 [pyrfc]: https://github.com/SAP-archive/PyRFC
