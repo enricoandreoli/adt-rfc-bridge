@@ -264,6 +264,13 @@ source, running checks: the **full ADT experience**, on a system where plain HTT
 never gets through, **with zero changes on the customer side.** The same trick
 works for any HTTP-only ADT client, not just `vsp`.
 
+And it is **backend-agnostic**: confirmed working on **S/4HANA and classic ECC /
+R/3 alike**. The only requirement is that the system has the ADT backend, i.e. the
+`SADT_REST_RFC_ENDPOINT` function module exists (ABAP Development Tools ship on SAP
+NetWeaver 7.31+ with the relevant support packages). Rule of thumb: if Eclipse ADT
+can open the system, this bridge can drive it, so you can bring Claude to
+long-running ECC landscapes, not only the latest stack.
+
 ## Limitations & safety
 
 - You need the NW RFC SDK and an RFC user with the ADT authorisations, i.e. a

@@ -46,6 +46,12 @@ You do **not** need this if the system exposes HTTP(S) directly (VPN-reachable
 ICM, a Web Dispatcher, or a SAProuter that permits raw routing to the ICM port).
 In those cases point your ADT client straight at the HTTP(S) endpoint.
 
+> **Backend-agnostic:** this works on **S/4HANA and classic ECC / R/3 alike**. The
+> only requirement is that the system has the ADT backend, i.e. the
+> `SADT_REST_RFC_ENDPOINT` function module exists (ABAP Development Tools ship on
+> SAP NetWeaver 7.31+ with the relevant support packages). Rule of thumb: if
+> Eclipse ADT can open the system, this bridge can drive it.
+
 ## How it works (short version)
 
 1. Your HTTP client sends a normal ADT REST request to `http://127.0.0.1:<port>`.
