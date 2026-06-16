@@ -146,6 +146,35 @@ Then point your HTTP-only ADT client at `http://127.0.0.1:<BRIDGE_PORT>`. For
 run your usual commands; e.g. a system-info / object-search call should now
 return data from the system behind the router.
 
+## Writing objects when the client self-blocks on `MODIFICATION_SUPPORT`
+
+On newer NetWeaver releases (observed on **752**) an ADT object **lock** through
+`SADT_REST_RFC_ENDPOINT` succeeds, it returns a valid `LOCK_HANDLE` and the
+transport, but the lock result also carries `MODIFICATION_SUPPORT=NoModification`.
+Some clients, including `vsp`, treat that as "not modifiable" and **abort before
+writing**, so edits fail with a *NoModification* error even though Eclipse edits
+the same object fine and the write would actually go through.
+
+That flag is a false stop on this dispatch path. The included **`adt_write.py`**
+helper performs the raw ADT write sequence against a running bridge, bypassing
+the client's self-block:
+
+```bash
+# the bridge must be running:  python adt_rfc_bridge.py
+python adt_write.py CLAS ZCL_FOO ./zcl_foo.abap T74K900123   # transportable
+python adt_write.py PROG ZFOO    ./zfoo.abap                 # local / $TMP
+```
+
+It does `LOCK -> PUT .../source/main -> activate -> UNLOCK`. Two headers on the
+`PUT` are mandatory and are the usual cause of failures when missing: `Accept`
+(without it SAP returns **400** *"Accept header missing"*) and, for a
+transportable object, `corrNr=<transport>` (without it **500** *"already locked
+in request"*). It reads the bridge URL from `$BRIDGE_URL` or
+`http://127.0.0.1:$BRIDGE_PORT`.
+
+> This is a workaround for the client's caution, **not** a change to the bridge:
+> the bridge forwards these requests unchanged.
+
 ## Use it as an MCP server (Claude Desktop, etc.)
 
 `vsp_launch.py` lets an MCP host (such as Claude Desktop) start everything with
