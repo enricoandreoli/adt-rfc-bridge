@@ -71,9 +71,14 @@ Two small adaptations make HTTP clients happy:
   requests. The function module is already authenticated by the RFC logon and
   does not validate CSRF, so this only satisfies the client.
 
-A single, lock-serialised RFC connection is reused so ADT stateful sessions
-(object locks etc.) survive across calls. The bridge connects **lazily**, it
-performs no SAP logon until the first ADT request.
+A single, lock-serialised RFC connection is reused and the bridge connects
+**lazily**, performing no SAP logon until the first ADT request. One important
+limit: `SADT_REST_RFC_ENDPOINT` is **stateless per call** (there is no HTTP
+session over RFC, which is exactly why the CSRF token has to be synthesised). So
+the bridge is great for **reads** and **single-shot source writes**, but it
+**cannot drive a multi-request stateful flow such as object activation**, see
+[Writing & activating objects](#writing--activating-objects) below for why and
+what to do instead.
 
 ---
 
@@ -146,18 +151,21 @@ Then point your HTTP-only ADT client at `http://127.0.0.1:<BRIDGE_PORT>`. For
 run your usual commands; e.g. a system-info / object-search call should now
 return data from the system behind the router.
 
-## Writing objects when the client self-blocks on `MODIFICATION_SUPPORT`
+## Writing & activating objects
 
-On newer NetWeaver releases (observed on **752**) an ADT object **lock** through
-`SADT_REST_RFC_ENDPOINT` succeeds, it returns a valid `LOCK_HANDLE` and the
-transport, but the lock result also carries `MODIFICATION_SUPPORT=NoModification`.
-Some clients, including `vsp`, treat that as "not modifiable" and **abort before
-writing**, so edits fail with a *NoModification* error even though Eclipse edits
-the same object fine and the write would actually go through.
+### Saving source over the bridge (and the `MODIFICATION_SUPPORT` self-block)
 
-That flag is a false stop on this dispatch path. The included **`adt_write.py`**
-helper performs the raw ADT write sequence against a running bridge, bypassing
-the client's self-block:
+On newer NetWeaver releases (observed on **752**) an ADT object **lock** succeeds,
+it returns a valid `LOCK_HANDLE` and the transport, but the lock result also
+carries `MODIFICATION_SUPPORT=NoModification`. Some clients, including `vsp`, treat
+that as "not modifiable" and **abort before writing**, so edits fail with a
+*NoModification* error even though Eclipse edits the same object fine and the write
+would actually go through. (That flag is a real NW 75x backend property, not an
+RFC-channel artifact — it shows up over plain HTTPS too — but it does **not**
+actually prevent the `PUT`.)
+
+The included **`adt_write.py`** helper performs the raw `LOCK -> PUT .../source/main
+-> UNLOCK` against a running bridge, bypassing the client's self-block:
 
 ```bash
 # the bridge must be running:  python adt_rfc_bridge.py
@@ -165,15 +173,55 @@ python adt_write.py CLAS ZCL_FOO ./zcl_foo.abap T74K900123   # transportable
 python adt_write.py PROG ZFOO    ./zfoo.abap                 # local / $TMP
 ```
 
-It does `LOCK -> PUT .../source/main -> activate -> UNLOCK`. Two headers on the
-`PUT` are mandatory and are the usual cause of failures when missing: `Accept`
-(without it SAP returns **400** *"Accept header missing"*) and, for a
-transportable object, `corrNr=<transport>` (without it **500** *"already locked
-in request"*). It reads the bridge URL from `$BRIDGE_URL` or
+Two headers on the `PUT` are mandatory and are the usual cause of failures when
+missing: `Accept` (without it SAP returns **400** *"Accept header missing"*) and,
+for a transportable object, `corrNr=<transport>` (without it **500** *"already
+locked in request"*). It reads the bridge URL from `$BRIDGE_URL` or
 `http://127.0.0.1:$BRIDGE_PORT`.
 
-> This is a workaround for the client's caution, **not** a change to the bridge:
-> the bridge forwards these requests unchanged.
+### Activation does NOT work over the RFC bridge — use the ICM HTTP(S) endpoint
+
+The `PUT` above saves your source as the object's **inactive** version, but you
+**cannot activate it through the bridge**. Because `SADT_REST_RFC_ENDPOINT` is
+stateless per call, each bridge request is a *different* ADT session: the `LOCK`
+creates a real enqueue, but the activation call doesn't own it (→ HTTP **403**
+*"User … is currently editing"*), and if you unlock first the session-bound
+inactive worklist is empty so activation is a silent **200 no-op**. The `PUT` works
+only because it self-authenticates with `lockHandle`+`corrNr`; activation has no
+such token. (Driving the three calls on one dedicated PyRFC connection doesn't help
+— function-group globals don't carry the ADT session — and the direct-RFC
+`RS_WORKING_OBJECTS_ACTIVATE` isn't RFC-callable.)
+
+The fix: if the target's **ICM HTTP(S) port is reachable** (directly, or via a
+SAProuter host that forwards it — many routers that allow OData/HTTPS also expose
+`/sap/bc/adt`), drive ADT over **real HTTP** instead. There the ADT session is
+stateful via the `sap-contextid` + `SAP_SESSIONID` cookies, so `LOCK -> PUT ->
+ACTIVATE` share one session and activation works — exactly like Eclipse. The
+included **`adt_https_write.py`** does the whole edit-and-activate end to end:
+
+```bash
+set SAP_URL=https://host:44300   &  set SAP_USER=...  &  set SAP_PASSWORD=...
+set SAP_CLIENT=100               &  set SAP_CORRNR=T74K900123
+python adt_https_write.py --uri /sap/bc/adt/oo/classes/zcl_foo --name ZCL_FOO \
+       --source ./zcl_foo.abap --check
+# or just activate an object that already has an inactive version:
+python adt_https_write.py --uri /sap/bc/adt/oo/classes/zcl_foo --name ZCL_FOO --activate-only
+```
+
+Two non-obvious details it handles, both of which silently cost hours otherwise:
+
+- **`GET .../source/main` returns the _inactive_ version when one exists.** Always
+  verify the real active code with `?version=active`, or you'll think you activated
+  when you didn't.
+- **Activation is two-phase.** `POST /sap/bc/adt/activation?...&preauditRequested=true`
+  returns the full set to activate, which includes the class **and the changed
+  method** (`adtcore:type="CLAS/OM/public"`) and the transport. You must then post
+  **all** of those object references with `preauditRequested=false`. Referencing only
+  the class is a silent no-op.
+
+> The RFC bridge stays the right tool for **reads/search/analyze** and for saving
+> source on RFC-only systems; pair it with `adt_https_write.py` for activation
+> whenever the ICM HTTP(S) port happens to be reachable.
 
 ## Use it as an MCP server (Claude Desktop, etc.)
 
