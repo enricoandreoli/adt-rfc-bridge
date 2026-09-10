@@ -223,6 +223,51 @@ Two non-obvious details it handles, both of which silently cost hours otherwise:
 > source on RFC-only systems; pair it with `adt_https_write.py` for activation
 > whenever the ICM HTTP(S) port happens to be reachable.
 
+### Reports (PROG) are the exception: no activation needed at all
+
+`RPY_PROGRAM_INSERT` **is** remote-enabled, and with `SAVE_INACTIVE = ' '` it writes
+the program straight into its **active** version. So on an RFC-only system you can
+create and update an executable report end to end, with no Eclipse and no ICM port.
+**`rpy_put_report.py`** does that, plus the text pool:
+
+```bash
+set RFC_ASHOST=10.0.0.1 & set RFC_SYSNR=00 & set RFC_CLIENT=100
+set RFC_USER=DEVELOPER  & set RFC_PASSWD=...
+python rpy_put_report.py --prog ZFOO --title "My report" --source ./zfoo.abap        --replace --seltexts ./selection-texts.txt --symbols ./text-symbols.txt
+```
+
+Four things it had to work around, each of which costs an afternoon:
+
+- **`RPY_PROGRAM_UPDATE` is not remote-enabled** (`CALL_FUNCTION_NOT_REMOTE`) and
+  `RPY_PROGRAM_DELETE` is not an RFC module at all. Replacing an existing report
+  therefore means: delete it through the bridge (ADT `LOCK` + `DELETE`), then insert
+  it again over RFC.
+- **The ADT `DELETE` leaves the enqueue behind** — same stateless-session story as
+  above — and the next insert dies with **EU 510** *"already being edited"*. You must
+  release it yourself with `?_action=UNLOCK&lockHandle=...`. `ENQUEUE_READ` is
+  remote-enabled and will show you the stray `TRDIR` lock; `ENQUE_DELETE` is not, and
+  `DEQUEUE_E_TRDIR` from another session won't touch it. The original lock handle is
+  the only thing that works.
+- **No text pool function module exists over RFC** (`RPY_TEXTPOOL_*` isn't there at
+  all), but ADT exposes
+  `/sap/bc/adt/textelements/programs/<prog>/source/{selections,symbols,headings}`.
+  A plain-text `PUT` there saves the **active** version, no activation involved.
+  Format: `NAME    =Text` (name padded to 8) for selection texts, `@MaxLength:<n>`
+  followed by `KEY=Text` for text symbols.
+- **Selection texts are capped at 30 characters.** One text over the limit and the
+  backend rejects the *whole* PUT with a bare **406** naming no culprit — it looks
+  like a header problem and isn't (a wrong content type returns 415). The script
+  checks the lengths before sending.
+
+A syntax check can be requested from the backend through the bridge, which is worth
+doing since the insert happily stores code that doesn't compile:
+
+```bash
+curl -X POST "http://127.0.0.1:8410/sap/bc/adt/checkruns?reporters=abapCheckRun"   -H "Content-Type: application/vnd.sap.adt.checkobjects+xml"   -H "X-CSRF-Token: ADT-RFC-BRIDGE"   --data '<?xml version="1.0" encoding="UTF-8"?><chkrun:checkObjectList xmlns:adtcore="http://www.sap.com/adt/core" xmlns:chkrun="http://www.sap.com/adt/checkrun"><chkrun:checkObject adtcore:uri="/sap/bc/adt/programs/programs/zfoo" chkrun:version="active"/></chkrun:checkObjectList>'
+```
+
+An empty `checkReport` means no errors.
+
 ## Use it as an MCP server (Claude Desktop, etc.)
 
 `vsp_launch.py` lets an MCP host (such as Claude Desktop) start everything with
